@@ -24,8 +24,11 @@ def get_inputs(data):
     # set props_map
     for prop, pos in data["props"].items():
         props_map[pos[0], pos[1]] = 1
-
-    mats = np.array([obstacle_map, gas_map, props_map, player_a, player_b, path]).transpose((1, 2, 0))
+    wall_part = np.array([obstacle_map, player_a, player_b]).transpose((1, 2, 0))
+    gas_part = np.array([gas_map, player_a, player_b]).transpose((1, 2, 0))
+    prop_part = np.array([props_map, player_a, player_b]).transpose((1, 2, 0))
+    path_part = np.array([path, player_a, player_b]).transpose((1, 2, 0))
+    mats = np.array([wall_part, gas_part, prop_part, path_part])
     return mats
 
 
@@ -55,14 +58,13 @@ def next(state, action):
     # input 12*12*5
     # env.map, env.gas_pos, env.weapon_pos, player_a, player_b, path_array
     next_state = None
-    map_ = state[:, :, 0]
-    gas_pos = state[:, :, 1]
-    weapon = state[:, :, 2]
-    player_pos = np.argwhere(state[:, :, 3] == 1)[0]
-    enemy_pos = np.argwhere(state[:, :, 4] == 1)[0]
-    path = state[:, :, -1]
+    map_ = state[0, :, :, 0]
+    gas_pos = state[1, :, :, 0]
+    weapon = state[2, :, :, 0]
+    player_pos = np.argwhere(state[0, :, :, 1] == 1)[0]
+    enemy_pos = np.argwhere(state[0, :, :, 2] == 1)[0]
+    path = state[3, :, :, 0]
     in_gas = False
-
     if gas_pos[player_pos[0]][player_pos[1]] > 0:
         in_gas = True
     r = new_r = int(player_pos[0])
@@ -83,6 +85,8 @@ def next(state, action):
     else:
         if map_[new_r, new_c] > 0:
             is_valid = False
+        #elif path[new_r, new_c] > 0:
+        #    is_valid = False
         elif new_r == enemy_pos[0] and new_c == enemy_pos[1]:
             is_valid = False
         else:
@@ -92,14 +96,21 @@ def next(state, action):
             if path[new_r, new_c] > 0:
                 has_repetition = True
             path[new_r, new_c] = 1
-            state[:, :, 3][r, c] = 0
-            state[:, :, 3][new_r, new_c] = 1
+
+            state[0, :, :, 1][r, c] = 0
+            state[0, :, :, 1][new_r, new_c] = 1
+            state[1, :, :, 1][r, c] = 0
+            state[1, :, :, 1][new_r, new_c] = 1
+            state[2, :, :, 1][r, c] = 0
+            state[2, :, :, 1][new_r, new_c] = 1
+            state[3, :, :, 1][r, c] = 0
+            state[3, :, :, 1][new_r, new_c] = 1
     #valid_action = (get_valid_action(map_, new_r, new_c, enemy_pos[0], enemy_pos[1])
     #                if is_valid else [0]*8)
     # modify by tj
     valid_action = get_valid_action(map_, new_r, new_c, enemy_pos[0], enemy_pos[1])
+    # modify by tj
     has_attack = is_attack(map_, enemy_pos, path)
-
     return is_valid, state, valid_action, has_weapon, in_gas, has_attack, has_repetition
 
 
@@ -135,29 +146,26 @@ def is_attack(map_, enemy, path):
 
 
 def get_reward(state, valid, action, has_weapon, in_gas, has_attack, has_repetition):
-    map_ = state[:, :, 0]
-    gas_pos = state[:, :, 1]
-    player_pos = np.argwhere(state[:, :, 3] == 1)[0]
-    enemy_pos = np.argwhere(state[:, :, 4] == 1)[0]
-    path = state[:, :, -1]
+    map_ = state[0, :, :, 0]
+    gas_pos = state[1, :, :, 0]
+    player_pos = np.argwhere(state[0, :, :, 1] == 1)[0]
+    enemy_pos = np.argwhere(state[0, :, :, 2] == 1)[0]
+    path = state[3, :, :, 0]
     r = 0
-
     #hit wall or hit enemy is invalid
     if not valid:
         return -1.0
     elif action == 8 and len(path[path > 0]) == 1:
         return -1.0
+
     if has_repetition:
-    #elif path[player_pos[0]][player_pos[1]] > 0:
         r -= 1
     if not in_gas and (gas_pos[player_pos[0]][player_pos[1]] > 0).any():
         r -= 0.5
 
     if is_adjacent(player_pos[0], player_pos[1], enemy_pos[0], enemy_pos[1]):
-        #r += 0.3
         r += 0.9
     if has_weapon:
-        #r += 0.15
         r += 0.5
     if action == 8 and not has_attack:
         r -= 1
@@ -176,9 +184,9 @@ def run_game():
             if s['is_done']:  # 如果进入终盘则跳出
                 break
             state = get_inputs(s)  # 将模拟器返回状态转换为12*12*6 tensor
-            map_ = state[:, :, 0]
-            player_pos = np.argwhere(state[:, :, 3] == 1)[0]
-            enemy_pos = np.argwhere(state[:, :, 4] == 1)[0]
+            map_ = state[0, :, :, 0]
+            player_pos = np.argwhere(state[0, :, :, 1] == 1)[0]
+            enemy_pos = np.argwhere(state[0, :, :, 2] == 1)[0]
             actions = np.array(get_valid_action(map_,
                                                 int(player_pos[0]), int(player_pos[1]),
                                                 enemy_pos[0], enemy_pos[1]))
@@ -196,7 +204,7 @@ def run_game():
                 done = 0 if action != 8 and valid else 1  # 本轮是否终止
                 reward = get_reward(state, valid, action, has_weapon, in_gas, has_attack, has_repetition)
                 RL.store_transition(observation_, action, reward)
-                player_pos = np.argwhere(state[:, :, 3] == 1)[0]
+                player_pos = np.argwhere(state[0, :, :, 1] == 1)[0]
                 moves.append(player_pos)
                 if done:
                     RL.learn()
@@ -211,7 +219,7 @@ def run_game():
 
 
 if __name__ == "__main__":
-    RL = PolicyGradient(n_actions=9, n_features=144 * 6 + 8, learning_rate=1e-8)
+    RL = PolicyGradient(n_actions=9, n_features=144 * 3 * 4 + 8, learning_rate=1e-9)
     run_game()
 
 
