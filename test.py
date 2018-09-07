@@ -221,5 +221,3 @@ def run_game():
 if __name__ == "__main__":
     RL = PolicyGradient(n_actions=9, n_features=144 * 3 * 4 + 8, learning_rate=1e-9)
     run_game()
-
-
